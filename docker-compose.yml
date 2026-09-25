@@ -1,0 +1,57 @@
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-dogfood}
+      MYSQL_USER: ${MYSQL_USER:-dogfood}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-dogfood}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dogfood-root}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u\"$$MYSQL_USER\" -p\"$$MYSQL_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-dogfood}:${MYSQL_PASSWORD:-dogfood}@mysql:3306/${MYSQL_DATABASE:-dogfood}?charset=utf8mb4
+      SEED_DATA: ${SEED_DATA:-true}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-168}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads_data:/data/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  frontend:
+    build:
+      context: .
+      args:
+        # Shows the demo-account shortcuts on the login page only when seed data is loaded.
+        REACT_APP_DEMO_ACCOUNTS: ${SEED_DATA:-true}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+
+volumes:
+  mysql_data:
+  uploads_data:
